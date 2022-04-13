@@ -11,12 +11,50 @@ const HOST = '0.0.0.0';
 const app = express();
 app.use(express.json()); // built-in middleware for express
 
-app.get('/', (req, res) => {
-  res.send('Hello World');
-});
+app.get('/list/cam/', (req, res) => {
+    
+    HTTPclient.get(`https://www.skylinewebcams.com/`,
+    function (query) {
+        let list = []
+        if (query.statusCode!=200){
+            res.status(404).send()
+            return
+        }
+        let page_body = "";
+        query.on('data', function (chuck) {
+            page_body+=chuck
+        })
+        query.on('end', function (){
+            let list = [];
+            const pageroot = HTMLParser.parse(page_body, {"blockTextElements": {"noscript":false,"style":false,"pre":false,"script":false}}).childNodes[1].childNodes[1].childNodes[0].childNodes[3].childNodes[0].childNodes[0].childNodes[2].childNodes[1]
+            // console.log(pageroot.childNodes[3].childNodes[1].childNodes)
+            pageroot.childNodes.forEach(continent => {
+                continent.childNodes.forEach(pagelist => {
+                    if(typeof pagelist.childNodes[1] === 'undefined') return;
+                    pagelist.childNodes[1].childNodes.forEach(listitem => {
+                        list.push({
+                            name: listitem.childNodes[0]._rawText,
+                            // uri: listitem.rawAttrs,
+                            uri: listitem.childNodes[0]._rawText.toLowerCase().replaceAll(' ','-'),
+                        })
+                    })
+                })
+            })
+            // pageroot.childNodes[0].childNodes[1].childNodes[0].childNodes.forEach(listitem => {
+            //     list.push({
+            //         name: listitem.childNodes[0]._rawText,
+            //         // uri: listitem.rawAttrs,
+            //         uri: listitem.childNodes[0]._rawText.toLowerCase().replace(' ','-'),
+            //     })
+            // })
+            res.send(list)
+        })
+    })
+})
 
 app.get('/list/cam/:state', (req, res) => {
 
+    if (req.params.state == 'web') req.params.state = 'live-cams-category/live-web-cams';
     HTTPclient.get(`https://www.skylinewebcams.com/en/webcam/${req.params.state}.html`,
     function (query) {
         let list = []
@@ -39,6 +77,9 @@ app.get('/list/cam/:state', (req, res) => {
                     if (detail.rawAttrs == 'class="tcam"'){
                         meta['title'] = detail.childNodes[0]._rawText
                     }
+                    // if (detail.rawTagName == 'img'){
+                    //     meta['thumb'] = detail.rawAttrs.substr(5, detail.rawAttrs.indexOf('.jpg')-1)
+                    // }
                     if (detail.rawAttrs == 'class="subt"'){
                         meta['desc'] = detail.childNodes[0]._rawText
                     }
@@ -67,7 +108,7 @@ app.get('/list/cam/:state', (req, res) => {
 
 app.get('/stream/:state/:region/:city/:place', (req, res) => {
 
-    HTTPclient.get(`https://www.skylinewebcams.com/it/webcam/${req.params.state}/${req.params.region}/${req.params.city}/${req.params.place}.html`,
+    HTTPclient.get(`https://www.skylinewebcams.com/en/webcam/${req.params.state}/${req.params.region}/${req.params.city}/${req.params.place}.html`,
     function (query) {
         //console.log(query.headers['set-cookie'][0].substr(0,query.headers['set-cookie'][0].indexOf(';')))
         if (query.statusCode!=200){
@@ -80,18 +121,53 @@ app.get('/stream/:state/:region/:city/:place', (req, res) => {
         })
         query.on('end', function (){
             const pageroot = HTMLParser.parse(page_body, {"blockTextElements": {"noscript":false,"style":false,"pre":false,"script":true}})
-            let scriptTag;
 
             try {
                 scriptTag = pageroot.childNodes[1].childNodes[1].childNodes[7].childNodes[0]._rawText
-                res.status(200).send({
-                    country: req.params.state,
-                    region: req.params.region,
-                    city: req.params.city,
-                    place: req.params.place,
-                    stream: "https://hd-auth.skylinewebcams.com/live.m3u8?a="+scriptTag.substr(scriptTag.indexOf("source:'livee.m3u8?a=")+21,26),
-                    original: `https://www.skylinewebcams.com/en/webcam/${req.params.state}/${req.params.region}/${req.params.city}/${req.params.place}.html`
+
+                let localtime = pageroot.childNodes[1].childNodes[1].childNodes[1].childNodes[0].childNodes[2].childNodes[0].childNodes[1].childNodes[0].childNodes[0].childNodes[2].childNodes[0].childNodes[2].childNodes[0]._rawText;
+                HTTPclient.get(`https://www.skylinewebcams.com/en/weather/${req.params.state}/${req.params.region}/${req.params.city}.html`,
+                function (query) {
+                    //console.log(query.headers['set-cookie'][0].substr(0,query.headers['set-cookie'][0].indexOf(';')))
+                    if (query.statusCode!=200){
+                        res.status(200).send({
+                            country: req.params.state,
+                            region: req.params.region,
+                            city: req.params.city,
+                            place: req.params.place,
+                            localtime,
+                            stream: "https://hd-auth.skylinewebcams.com/live.m3u8?a="+scriptTag.substr(scriptTag.indexOf("source:'livee.m3u8?a=")+21,26),
+                            original: `https://www.skylinewebcams.com/en/webcam/${req.params.state}/${req.params.region}/${req.params.city}/${req.params.place}.html`
+                        })
+
+                        return
+                    }
+                    let page_body = "";
+                    query.on('data', function (chuck) {
+                        page_body+=chuck
+                    })
+                    query.on('end', function (){
+                        const pageroot = HTMLParser.parse(page_body, {"blockTextElements": {"noscript":false,"style":false,"pre":false,"script":true}}).childNodes[1].childNodes[1].childNodes[1].childNodes[0].childNodes[0].childNodes[0]
+                        let weather = pageroot.childNodes[2].childNodes[0].childNodes[0].childNodes[1]
+                        let sundata = pageroot.childNodes[4].childNodes[0].childNodes[2].childNodes[0].childNodes[1]._rawText
+                        // console.log(sundata, weather.childNodes[0].rawAttrs, weather.childNodes[1].childNodes[0]._rawText)
+
+                        res.status(200).send({
+                            country: req.params.state,
+                            region: req.params.region,
+                            city: req.params.city,
+                            place: req.params.place,
+                            localtime,
+                            sunrise: sundata.substring(sundata.indexOf(':')-2,sundata.indexOf(':')+3),
+                            sunset: sundata.substring(sundata.lastIndexOf(':')-2,sundata.lastIndexOf(':')+3),
+                            forecast: weather?.childNodes[0]?.rawAttrs ?? null,
+                            temperature: weather?.childNodes[1]?.childNodes[0]?._rawText ?? null,
+                            stream: "https://hd-auth.skylinewebcams.com/live.m3u8?a="+scriptTag.substr(scriptTag.indexOf("source:'livee.m3u8?a=")+21,26),
+                            original: `https://www.skylinewebcams.com/en/webcam/${req.params.state}/${req.params.region}/${req.params.city}/${req.params.place}.html`
+                        })
+                    })
                 })
+
             } catch (e) {
                 console.log("Stream Not Found, checking youtube...",e)
                 try {
